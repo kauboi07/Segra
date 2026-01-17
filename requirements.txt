@@ -1,0 +1,8 @@
+opencv-python
+facenet-pytorch
+torch
+torchvision
+numpy
+pillow
+flask
+requests
