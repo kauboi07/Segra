@@ -8,6 +8,7 @@ __pycache__/
 # Data folders
 data/incoming/*
 data/logs/*
+data/ref/*
 
 # OS junk
 .DS_Store

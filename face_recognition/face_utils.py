@@ -4,10 +4,6 @@ import torch
 from PIL import Image
 from facenet_pytorch import MTCNN, InceptionResnetV1
 
-# -------------------------------
-# Model initialization (ONCE)
-# -------------------------------
-
 mtcnn = MTCNN(
     image_size=160,
     margin=20,
@@ -18,22 +14,11 @@ resnet = InceptionResnetV1(
     pretrained="vggface2"
 ).eval()
 
-# -------------------------------
-# Path to stored face embeddings
-# -------------------------------
 
 FACES_DIR = "data/registered_faces"
 
 
-# -------------------------------
-# Extract face embedding
-# -------------------------------
-
 def extract_embedding(image_path):
-    """
-    Input: image path
-    Output: 512-d face embedding (numpy array)
-    """
 
     # Load image
     img = Image.open(image_path).convert("RGB")
@@ -54,14 +39,8 @@ def extract_embedding(image_path):
     return embedding.numpy()[0]
 
 
-# -------------------------------
-# Register a new user face
-# -------------------------------
 
 def register_face(user_id, image_path):
-    """
-    Registers a user's face by saving embedding
-    """
 
     embedding = extract_embedding(image_path)
 
@@ -76,9 +55,7 @@ def register_face(user_id, image_path):
     print(f"[INFO] Face registered for user: {user_id}")
 
 
-# -------------------------------
-# Recognize a face
-# -------------------------------
+
 
 def recognize_face(image_path, threshold=0.9):
     """
