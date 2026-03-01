@@ -1,62 +1,79 @@
-from flask import Flask, jsonify, send_file
+from flask import Flask, jsonify, render_template_string
 import requests
 import os
 import time
 from face_recognition.face_utils import recognize_face
 from wasteclassifier import classify_waste
-from flask import render_template_string
 
 app = Flask(__name__)
 
-ESP_IP = "http://10.211.145.165"
-INCOMING_DIR = "data/incoming"
+# ==========================
+# IP CONFIG
+# ==========================
+CAMERA_IP = "http://10.211.145.165"   # ESP32-CAM
+SERVO_IP  = "http://10.211.145.254"   # Servo ESP
+
 DJANGO_API_BASE = os.getenv("DJANGO_API_BASE", "http://localhost:8000/api")
 
+INCOMING_DIR = "data/incoming"
 os.makedirs(INCOMING_DIR, exist_ok=True)
 
+# ==========================
+# BIN MAPPING
+# ==========================
+BIN_ENDPOINT_MAP = {
+    "organic": "s1",
+    "plastic": "s2",
+    "metal": "s3",
+    "ewaste": "s4"
+}
 
-#capture image from esp32 cam
+WASTE_TYPE_MAP = {
+    "organic": "bio",
+    "plastic": "plastic",
+    "metal": "metal",
+    "ewaste": "ewaste"
+}
+
+# ==========================
+# CAMERA CAPTURE
+# ==========================
 def capture_image(filename):
     try:
-        response = requests.get(f"{ESP_IP}/capture", timeout=10)
-
+        response = requests.get(f"{CAMERA_IP}/capture", timeout=10)
         if response.status_code != 200:
             return None
 
-        image_path = os.path.join(INCOMING_DIR, filename)
-
-        with open(image_path, "wb") as f:
+        path = os.path.join(INCOMING_DIR, filename)
+        with open(path, "wb") as f:
             f.write(response.content)
 
-        return image_path
-
-    except Exception:
+        return path
+    except Exception as e:
+        print("Camera error:", e)
         return None
 
-
-#get uid
+# ==========================
+# DJANGO HELPERS
+# ==========================
 def get_user_id_by_username(username):
     try:
         response = requests.get(f"{DJANGO_API_BASE}/v1/users/", timeout=10)
-
         if response.status_code == 200:
             users = response.json()
             for user in users:
                 if user.get("username") == username:
                     return user.get("id")
-
+        return None
+    except Exception as e:
+        print("Django fetch error:", e)
         return None
 
-    except Exception:
-        return None
 
-
-#give points
 def award_points(username, waste_type):
     user_id = get_user_id_by_username(username)
-
     if user_id is None:
-        print("User not found in Django:", username)
+        print("User not found:", username)
         return None
 
     payload = {
@@ -75,30 +92,51 @@ def award_points(username, waste_type):
         if response.status_code == 200:
             return response.json()
 
-        print("error:", response.text)
+        print("Django error:", response.text)
+        return None
+    except Exception as e:
+        print("Django award error:", e)
         return None
 
-    except Exception:
-        return None
+# ==========================
+# SERVO CONTROL
+# ==========================
+def open_bin(waste_type):
+    endpoint = BIN_ENDPOINT_MAP.get(waste_type)
 
-WASTE_TYPE_MAP = {
-    "organic": "bio",
-    "plastic": "plastic",
-    "metal": "metal",
-    "ewaste": "ewaste"
-}
+    if not endpoint:
+        print("No bin mapping for:", waste_type)
+        return
 
+    try:
+        # Open servo
+        requests.get(f"{SERVO_IP}/{endpoint}/open", timeout=5)
 
-#flow
+        # Keep open 2 seconds
+        time.sleep(2)
+
+        # Close servo
+        requests.get(f"{SERVO_IP}/{endpoint}/close", timeout=5)
+
+        print(f"Opened bin for {waste_type}")
+
+    except Exception as e:
+        print("Servo error:", e)
+
+# ==========================
+# MAIN FLOW
+# ==========================
 @app.route("/start", methods=["GET"])
 def start_process():
     try:
-        # face
-        print("Capturing face...")
+        print("Preparing for face capture...")
+        time.sleep(2)   # give user time to position face
+
+        print("Capturing fresh face...")
         face_image = capture_image("face.jpg")
 
         if face_image is None:
-            return jsonify({"error": "Failed to capture face image"}), 500
+            return jsonify({"error": "Face capture failed"}), 500
 
         user, distance = recognize_face(face_image)
 
@@ -109,25 +147,23 @@ def start_process():
             })
 
         confidence = float(round(1 - float(distance), 3))
+        print("User recognized:", user)
 
-        print(f"User recognized: {user}")
-        print("Waiting 5 seconds for waste...")
-
+        print("Now show waste object...")
         time.sleep(5)
 
-        # object
-        print("Capturing waste...")
+        print("Capturing fresh waste...")
         waste_image = capture_image("waste.jpg")
 
         if waste_image is None:
-            return jsonify({"error": "Failed to capture waste image"}), 500
+            return jsonify({"error": "Waste capture failed"}), 500
 
         waste_type = classify_waste(waste_image)
-        print(f"Waste detected: {waste_type}")
+        print("Waste detected:", waste_type)
+
+        open_bin(waste_type)
 
         django_type = WASTE_TYPE_MAP.get(waste_type, waste_type)
-
-        #points
         points_response = award_points(user, django_type)
 
         return jsonify({
@@ -141,23 +177,9 @@ def start_process():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-'''
-@app.route("/last_image/<image_type>", methods=["GET"])
-def last_image(image_type):
-    if image_type not in ["face", "waste"]:
-        return jsonify({"error": "Invalid image type"}), 400
-
-    image_path = os.path.join(INCOMING_DIR, f"{image_type}.jpg")
-
-    if os.path.exists(image_path):
-        return send_file(image_path, mimetype="image/jpeg")
-    else:
-        return jsonify({"error": "Image not found"}), 404
-'''
-
-#preview page(testing not in production) - in prod we will replace this webapge
-#with a physical button so when user clicks that the process will start it is not implemented yet.
+# ==========================
+# PREVIEW PAGE
+# ==========================
 @app.route("/preview")
 def preview():
     html = f"""
@@ -185,7 +207,7 @@ def preview():
     </head>
     <body>
         <h2>Smart Bin Camera Preview</h2>
-        <img src="{ESP_IP}/stream">
+        <img src="{CAMERA_IP}/capture">
         <br>
         <button onclick="window.location.href='/start'">
             Start Smart Bin Process
@@ -194,8 +216,6 @@ def preview():
     </html>
     """
     return render_template_string(html)
-
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)

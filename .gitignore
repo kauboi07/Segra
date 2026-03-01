@@ -12,3 +12,5 @@ data/ref/*
 
 # OS junk
 .DS_Store
+libraries/
+Arduino/

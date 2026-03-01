@@ -1,0 +1,71 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <ESP32Servo.h>
+
+const char* ssid = "MK's Nord";
+const char* password = "12345678";
+
+#define SERVO1 26
+#define SERVO2 27
+#define SERVO3 25
+#define SERVO4 33
+
+Servo s1, s2, s3, s4;
+WebServer server(80);
+
+void openServo(Servo &servo) { servo.write(75); }
+void closeServo(Servo &servo) { servo.write(0); }
+
+void handleRoot() {
+  String html = "<html><body style='text-align:center;font-family:Arial;background:#111;color:white'>";
+  html += "<h2>Smart Bin Servo Control</h2>";
+
+  for (int i = 1; i <= 4; i++) {
+    html += "<h3>Servo " + String(i) + "</h3>";
+    html += "<button onclick=\"location.href='/s" + String(i) + "/open'\">Open</button>";
+    html += "<button onclick=\"location.href='/s" + String(i) + "/close'\">Close</button>";
+  }
+
+  html += "</body></html>";
+  server.send(200, "text/html", html);
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  s1.attach(SERVO1);
+  s2.attach(SERVO2);
+  s3.attach(SERVO3);
+  s4.attach(SERVO4);
+
+  s1.write(0);
+  s2.write(0);
+  s3.write(0);
+  s4.write(0);
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) delay(500);
+
+  Serial.println("Servo ESP IP:");
+  Serial.println(WiFi.localIP());
+
+  server.on("/", handleRoot);
+
+  server.on("/s1/open", [](){ openServo(s1); server.send(200,"text/plain","OK"); });
+  server.on("/s1/close", [](){ closeServo(s1); server.send(200,"text/plain","OK"); });
+
+  server.on("/s2/open", [](){ openServo(s2); server.send(200,"text/plain","OK"); });
+  server.on("/s2/close", [](){ closeServo(s2); server.send(200,"text/plain","OK"); });
+
+  server.on("/s3/open", [](){ openServo(s3); server.send(200,"text/plain","OK"); });
+  server.on("/s3/close", [](){ closeServo(s3); server.send(200,"text/plain","OK"); });
+
+  server.on("/s4/open", [](){ openServo(s4); server.send(200,"text/plain","OK"); });
+  server.on("/s4/close", [](){ closeServo(s4); server.send(200,"text/plain","OK"); });
+
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+}

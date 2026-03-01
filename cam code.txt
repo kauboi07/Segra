@@ -2,11 +2,12 @@
 #include <WiFi.h>
 #include <WebServer.h>
 
-// ===== WIFI =====
 const char* ssid = "MK's Nord";
 const char* password = "12345678";
 
-// ===== CAMERA PINS (AI THINKER) =====
+WebServer server(80);
+
+// AI Thinker pins
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
 #define XCLK_GPIO_NUM      0
@@ -24,11 +25,9 @@ const char* password = "12345678";
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
-WebServer server(80);
-
-// ===== CAMERA INIT =====
 void startCamera() {
   camera_config_t config;
+
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
   config.pin_d0 = Y2_GPIO_NUM;
@@ -47,34 +46,37 @@ void startCamera() {
   config.pin_sccb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
+
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-
   config.frame_size = FRAMESIZE_VGA;
-  config.jpeg_quality = 10;
+  config.jpeg_quality = 12;
   config.fb_count = 2;
 
   if (esp_camera_init(&config) != ESP_OK) {
     Serial.println("Camera init failed");
-    return;
+    while (true);
   }
 }
 
-// ===== CAPTURE SINGLE IMAGE =====
 void handleCapture() {
+  // Flush 3 frames to avoid stale image
+  for (int i = 0; i < 3; i++) {
+    camera_fb_t * tmp = esp_camera_fb_get();
+    esp_camera_fb_return(tmp);
+  }
+
   camera_fb_t * fb = esp_camera_fb_get();
   if (!fb) {
-    server.send(500, "text/plain", "Camera capture failed");
+    server.send(500, "text/plain", "Capture failed");
     return;
   }
 
   server.sendHeader("Content-Type", "image/jpeg");
   server.send_P(200, "image/jpeg", (const char*)fb->buf, fb->len);
-
   esp_camera_fb_return(fb);
 }
 
-// ===== MJPEG STREAM =====
 void handleStream() {
   WiFiClient client = server.client();
 
@@ -92,15 +94,8 @@ void handleStream() {
     server.sendContent("\r\n");
 
     esp_camera_fb_return(fb);
-    delay(30); // ~30 FPS control
+    delay(30);
   }
-}
-
-// ===== ROOT PAGE =====
-void handleRoot() {
-  String html = "<h2>ESP32-CAM Live Stream</h2>";
-  html += "<img src='/stream'>";
-  server.send(200, "text/html", html);
 }
 
 void setup() {
@@ -108,27 +103,16 @@ void setup() {
   startCamera();
 
   WiFi.begin(ssid, password);
-  Serial.print("Connecting");
+  while (WiFi.status() != WL_CONNECTED) delay(500);
 
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println("\nWiFi connected!");
-  Serial.print("Open browser: http://");
+  Serial.println("Camera IP:");
   Serial.println(WiFi.localIP());
 
-  server.on("/", handleRoot);
-  server.on("/capture", HTTP_GET, handleCapture);
-  server.on("/stream", HTTP_GET, handleStream);
-
+  server.on("/capture", handleCapture);
+  server.on("/stream", handleStream);
   server.begin();
 }
 
 void loop() {
   server.handleClient();
 }
-
-
-//vibe coded
